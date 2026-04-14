@@ -70,9 +70,21 @@ body {
   text-transform: uppercase;
 }
 
-.file-input {
+.example-select {
   width: 100%;
-  margin-top: 12px;
+  padding: 6px 8px;
+  border: 1px solid rgba(29, 26, 21, 0.2);
+  border-radius: 4px;
+  background: #f5f0e8;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: #1d1a15;
+  cursor: pointer;
+}
+
+.example-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .summary-grid {

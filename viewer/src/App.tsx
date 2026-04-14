@@ -1,7 +1,6 @@
 import { Bounds, Grid, Html, Line, OrbitControls, PerspectiveCamera, Sphere, useGLTF } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
 import * as THREE from "three";
 import type { Pose, SceneDeckItem, SceneInstrument, TwinBundle, WorkingVolume } from "./types";
 import {
@@ -16,7 +15,7 @@ import {
   toWorldPosition,
 } from "./lib/playback";
 
-const DEFAULT_BUNDLE_PATH = "/examples/asmi-panda-deck.json";
+const EXAMPLES_MANIFEST_PATH = "/examples/manifest.json";
 
 type ViewerToggles = {
   showGrid: boolean;
@@ -377,16 +376,24 @@ function App() {
     showGantryPath: true,
     showInstrumentOffsets: true,
   });
+  const [availableExamples, setAvailableExamples] = useState<string[]>([]);
+  const [selectedExample, setSelectedExample] = useState<string>("");
   const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(DEFAULT_BUNDLE_PATH)
+    fetch(EXAMPLES_MANIFEST_PATH)
       .then(async (response) => {
-        if (!response.ok) {
-          return;
-        }
-        const nextBundle = (await response.json()) as TwinBundle;
+        if (!response.ok) return;
+        const files = (await response.json()) as string[];
+        if (cancelled) return;
+        setAvailableExamples(files);
+        if (files.length === 0) return;
+        const first = files[0];
+        setSelectedExample(first);
+        const bundleResponse = await fetch(`/examples/${first}`);
+        if (!bundleResponse.ok || cancelled) return;
+        const nextBundle = (await bundleResponse.json()) as TwinBundle;
         if (!cancelled) {
           setBundle(nextBundle);
           setError("");
@@ -436,13 +443,16 @@ function App() {
     return samplePlayback(bundle, timeSeconds);
   }, [bundle, timeSeconds]);
 
-  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
+  const handleExampleChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const filename = event.target.value;
+    setSelectedExample(filename);
     try {
-      const nextBundle = JSON.parse(await file.text()) as TwinBundle;
+      const response = await fetch(`/examples/${filename}`);
+      if (!response.ok) {
+        setError(`Failed to load ${filename}: ${response.statusText}`);
+        return;
+      }
+      const nextBundle = (await response.json()) as TwinBundle;
       setBundle(nextBundle);
       setTimeSeconds(0);
       setIsPlaying(false);
@@ -466,11 +476,18 @@ function App() {
         <div className="stack">
           <section className="card">
             <h2>Bundle</h2>
-            <div className="hud-item">
-              <span className="hud-label">Default example</span>
-              <span className="hud-value">{bundle ? DEFAULT_BUNDLE_PATH : "Load a JSON bundle"}</span>
-            </div>
-            <input className="file-input" type="file" accept="application/json" onChange={handleFileChange} />
+            <select
+              className="example-select"
+              value={selectedExample}
+              onChange={handleExampleChange}
+              disabled={availableExamples.length === 0}
+            >
+              {availableExamples.map((filename) => (
+                <option key={filename} value={filename}>
+                  {filename.replace(".json", "")}
+                </option>
+              ))}
+            </select>
             {error ? <p className="error">{error}</p> : null}
           </section>
 
