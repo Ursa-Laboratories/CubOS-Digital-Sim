@@ -24,15 +24,18 @@ export type SceneDeckItem = {
   type: string;
   name: string;
   model_name: string;
-  render_kind: "asset" | "well_plate" | "tip_rack" | "vial" | "bounding_box";
+  render_kind: "asset" | "well_plate" | "tip_rack" | "vial" | "bounding_box" | "wall";
   asset_path: string | null;
-  primary_position: Pose;
+  placement_anchor: Pose | null;
+  default_target: Pose;
+  twin_anchor: Pose;
   dimensions: {
     length_mm: number | null;
     width_mm: number | null;
     height_mm: number | null;
   };
-  points: SceneDeckPoint[];
+  named_targets: SceneDeckPoint[];
+  validation_points: SceneDeckPoint[];
   render_meta: Record<string, unknown>;
 };
 
@@ -44,6 +47,7 @@ export type SceneInstrument = {
   offset_y: number;
   depth: number;
   measurement_height: number;
+  safe_approach_height: number;
   initial_tip_pose: Pose;
 };
 
@@ -87,13 +91,13 @@ export type TimelineEvent = MotionEvent | ActionEvent | DwellEvent;
 
 export type TwinBundle = {
   scene: {
+    contract_version: string;
     gantry: {
       working_volume: WorkingVolume;
       homing_strategy: string;
       y_axis_motion: string;
       initial_gantry_pose: Pose;
-      safe_z_height: number;
-      max_z_height: number;
+      total_z_height: number;
     };
     deck: SceneDeckItem[];
     instruments: SceneInstrument[];

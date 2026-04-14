@@ -3,7 +3,7 @@ name = "cubos-digital-twin"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "cubos @ git+https://github.com/Ursa-Laboratories/CubOS.git@main",
+    "cubos @ git+https://github.com/Ursa-Laboratories/CubOS.git@refactor-z-coordinates",
     "pyyaml",
 ]
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,42 +14,55 @@ import yaml
 from board import Board, BoardYamlSchema, load_board_from_yaml_safe
 from deck import (
     Deck,
-    NestedVialYamlEntry,
-    NestedWellPlateYamlEntry,
-    PlateOrientation,
+    DeckYamlSchema,
+    HolderLabware,
+    TipDisposal,
     TipRack,
     TipRackYamlEntry,
     Vial,
     VialHolder,
     VialHolderYamlEntry,
     VialYamlEntry,
+    Wall,
     WellPlate,
     WellPlateHolder,
     WellPlateHolderYamlEntry,
     WellPlateYamlEntry,
     load_deck_from_yaml_safe,
-    load_deck_render_schema,
-    resolve_definition_asset_path,
-    resolve_plate_orientation,
 )
-from gantry import (
-    DEFAULT_FEED_RATE,
-    DEFAULT_USER_MAX_Z_HEIGHT,
-    DEFAULT_USER_SAFE_Z_HEIGHT,
-    GantryConfig,
-    MotionPose,
-    MotionSegmentPlan,
-    coerce_motion_pose,
-    load_gantry_from_yaml_safe,
-    plan_safe_move_segments,
-    resolve_gantry_target,
-    resolve_instrument_tip_pose,
-)
+import deck.labware.definitions.registry as definition_registry
+from deck.labware.definitions.registry import load_definition_config, load_registry
+from deck.yaml_schema import NestedVialYamlEntry, NestedWellPlateYamlEntry
+from gantry import GantryConfig, load_gantry_from_yaml_safe
 from protocol_engine import Protocol, ProtocolContext, ProtocolStep, load_protocol_from_yaml_safe
 from validation import SetupValidationError, validate_deck_positions, validate_gantry_positions
 
 
 _SUPPORTED_PHASE_ONE_COMMANDS = {"move", "scan"}
+_DEFAULT_FEED_RATE = 2000.0
+_Z_TOLERANCE_MM = 1e-4
+
+
+@dataclass(frozen=True)
+class MotionPose:
+    x: float
+    y: float
+    z: float
+
+    def to_dict(self) -> dict[str, float]:
+        return {"x": self.x, "y": self.y, "z": self.z}
+
+
+@dataclass(frozen=True)
+class MotionSegmentPlan:
+    phase: str
+    start_pose: MotionPose
+    end_pose: MotionPose
+    feed_rate: float
+    distance_mm: float
+    real_duration_s: float
+
+
 def _load_yaml(path: str | Path) -> dict[str, Any]:
     raw = yaml.safe_load(Path(path).read_text()) or {}
     if not isinstance(raw, dict):
@@ -55,9 +70,23 @@ def _load_yaml(path: str | Path) -> dict[str, Any]:
     return raw
 
 
+def _coerce_motion_pose(coord: Any) -> MotionPose:
+    if isinstance(coord, MotionPose):
+        return coord
+    if isinstance(coord, dict):
+        return MotionPose(x=float(coord["x"]), y=float(coord["y"]), z=float(coord["z"]))
+    if isinstance(coord, (tuple, list)) and len(coord) == 3:
+        return MotionPose(x=float(coord[0]), y=float(coord[1]), z=float(coord[2]))
+    return MotionPose(x=float(coord.x), y=float(coord.y), z=float(coord.z))
+
+
 def _coord_dict(coord: Any) -> dict[str, float]:
-    pose = coerce_motion_pose(coord)
-    return pose.to_dict()
+    return _coerce_motion_pose(coord).to_dict()
+
+
+def _coord_key(coord: Any) -> tuple[float, float, float]:
+    pose = _coerce_motion_pose(coord)
+    return (round(pose.x, 6), round(pose.y, 6), round(pose.z, 6))
 
 
 def _format_target_label(target: Any) -> str:
@@ -74,15 +103,73 @@ def _event_base_duration(event: dict[str, Any]) -> float:
     return max(float(event.get("duration_s", 0.0)), 0.0)
 
 
+def _distance_mm(start_pose: MotionPose, end_pose: MotionPose) -> float:
+    return math.dist(
+        (start_pose.x, start_pose.y, start_pose.z),
+        (end_pose.x, end_pose.y, end_pose.z),
+    )
+
+
+def _duration_s(distance_mm: float, feed_rate: float) -> float:
+    if distance_mm <= 0:
+        return 0.0
+    if feed_rate <= 0:
+        return 0.0
+    return distance_mm / feed_rate * 60.0
+
+
+def _segment_phase(start_pose: MotionPose, end_pose: MotionPose) -> str:
+    same_x = math.isclose(start_pose.x, end_pose.x, abs_tol=1e-9)
+    same_y = math.isclose(start_pose.y, end_pose.y, abs_tol=1e-9)
+    same_z = math.isclose(start_pose.z, end_pose.z, abs_tol=1e-9)
+    if same_x and same_y and same_z:
+        return "hold"
+    if same_x and same_y:
+        return "lift_z" if end_pose.z > start_pose.z else "descend_z"
+    if same_z:
+        return "traverse_xy"
+    return "move_xyz"
+
+
+def _motion_segment(
+    *,
+    start_pose: MotionPose,
+    end_pose: MotionPose,
+    feed_rate: float = _DEFAULT_FEED_RATE,
+) -> MotionSegmentPlan:
+    distance_mm = _distance_mm(start_pose, end_pose)
+    return MotionSegmentPlan(
+        phase=_segment_phase(start_pose, end_pose),
+        start_pose=start_pose,
+        end_pose=end_pose,
+        feed_rate=feed_rate,
+        distance_mm=distance_mm,
+        real_duration_s=_duration_s(distance_mm, feed_rate),
+    )
+
+
+def _resolve_gantry_target(x: float, y: float, z: float, instrument: Any) -> MotionPose:
+    return MotionPose(
+        x=float(x) - float(instrument.offset_x),
+        y=float(y) - float(instrument.offset_y),
+        z=float(z) - float(instrument.depth),
+    )
+
+
+def _resolve_instrument_tip_pose(gantry_pose: Any, instrument: Any) -> MotionPose:
+    pose = _coerce_motion_pose(gantry_pose)
+    return MotionPose(
+        x=pose.x + float(instrument.offset_x),
+        y=pose.y + float(instrument.offset_y),
+        z=pose.z + float(instrument.depth),
+    )
+
+
 class _TracingGantry:
     """Minimal gantry used during export playback."""
 
-    def __init__(self, initial_pose: MotionPose | None = None) -> None:
-        self._pose = initial_pose or MotionPose(
-            x=0.0,
-            y=0.0,
-            z=DEFAULT_USER_MAX_Z_HEIGHT,
-        )
+    def __init__(self, initial_pose: MotionPose) -> None:
+        self._pose = initial_pose
 
     def move_to(self, x: float, y: float, z: float) -> None:
         self._pose = MotionPose(x=float(x), y=float(y), z=float(z))
@@ -91,17 +178,32 @@ class _TracingGantry:
         return self._pose.to_dict()
 
     def home(self) -> None:
-        self._pose = MotionPose(x=0.0, y=0.0, z=DEFAULT_USER_MAX_Z_HEIGHT)
+        self._pose = MotionPose(x=0.0, y=0.0, z=self._pose.z)
 
     def zero_coordinates(self) -> None:
-        self._pose = MotionPose(x=0.0, y=0.0, z=DEFAULT_USER_MAX_Z_HEIGHT)
+        self._pose = MotionPose(x=0.0, y=0.0, z=self._pose.z)
 
     def set_serial_timeout(self, _seconds: float) -> None:
         return None
 
 
+def _iter_actionable_named_target_ids(labware: Any) -> list[str]:
+    if isinstance(labware, WellPlate):
+        return sorted(labware.wells)
+    if isinstance(labware, TipRack):
+        return sorted(labware.tips)
+    if isinstance(labware, HolderLabware):
+        target_ids: list[str] = []
+        for child_name, child_labware in sorted(labware.contained_labware.items()):
+            target_ids.append(child_name)
+            for child_target_id in _iter_actionable_named_target_ids(child_labware):
+                target_ids.append(f"{child_name}.{child_target_id}")
+        return target_ids
+    return []
+
+
 class TracingBoard(Board):
-    """Board that records atomic motion segments instead of teleporting."""
+    """Board that records atomic motion segments instead of sending G-code."""
 
     def __init__(
         self,
@@ -110,14 +212,10 @@ class TracingBoard(Board):
         instruments: dict[str, Any],
         timeline: list[dict[str, Any]],
         deck: Deck | None = None,
-        safe_z_height: float = DEFAULT_USER_SAFE_Z_HEIGHT,
-        max_z_height: float = DEFAULT_USER_MAX_Z_HEIGHT,
-        feed_rate: float = DEFAULT_FEED_RATE,
+        feed_rate: float = _DEFAULT_FEED_RATE,
     ) -> None:
         super().__init__(gantry=gantry, instruments=instruments)
         self.timeline = timeline
-        self.safe_z_height = safe_z_height
-        self.max_z_height = max_z_height
         self.feed_rate = feed_rate
         self.deck = deck
         self._active_step: ProtocolStep | None = None
@@ -175,11 +273,13 @@ class TracingBoard(Board):
 
         lookup: dict[tuple[float, float, float], str] = {}
         for deck_key, labware in deck.labware.items():
-            for point_id, coord in labware.iter_positions().items():
-                label = f"{deck_key}.{point_id}"
-                lookup[self._coord_key(coord)] = label
-            initial_key = self._coord_key(labware.get_initial_position())
-            lookup.setdefault(initial_key, deck_key)
+            lookup[_coord_key(labware.get_default_target())] = deck_key
+            for target_id in _iter_actionable_named_target_ids(labware):
+                try:
+                    label = f"{deck_key}.{target_id}"
+                    lookup[_coord_key(labware.get_named_target(target_id))] = label
+                except KeyError:
+                    continue
         return lookup
 
     def _build_xy_lookup(self, deck: Deck | None) -> dict[tuple[float, float], str]:
@@ -188,19 +288,15 @@ class TracingBoard(Board):
 
         lookup: dict[tuple[float, float], str] = {}
         for deck_key, labware in deck.labware.items():
-            for point_id, coord in labware.iter_positions().items():
-                lookup[(round(float(coord.x), 6), round(float(coord.y), 6))] = f"{deck_key}.{point_id}"
-            initial_pose = labware.get_initial_position()
-            lookup.setdefault(
-                (round(float(initial_pose.x), 6), round(float(initial_pose.y), 6)),
-                deck_key,
-            )
+            default_target = _coerce_motion_pose(labware.get_default_target())
+            lookup[(round(default_target.x, 6), round(default_target.y, 6))] = deck_key
+            for target_id in _iter_actionable_named_target_ids(labware):
+                try:
+                    target = _coerce_motion_pose(labware.get_named_target(target_id))
+                except KeyError:
+                    continue
+                lookup[(round(target.x, 6), round(target.y, 6))] = f"{deck_key}.{target_id}"
         return lookup
-
-    @staticmethod
-    def _coord_key(coord: Any) -> tuple[float, float, float]:
-        pose = coerce_motion_pose(coord)
-        return (round(pose.x, 6), round(pose.y, 6), round(pose.z, 6))
 
     def _target_label_for_position(self, position: Any) -> str:
         if self._active_step is not None and "position" in self._active_step.args:
@@ -208,16 +304,49 @@ class TracingBoard(Board):
             if isinstance(raw_position, str):
                 return raw_position
 
-        lookup_key = self._coord_key(position)
+        lookup_key = _coord_key(position)
         if lookup_key in self._coordinate_lookup:
             return self._coordinate_lookup[lookup_key]
-
-        pose = coerce_motion_pose(position)
+        pose = _coerce_motion_pose(position)
         xy_key = (round(pose.x, 6), round(pose.y, 6))
         if xy_key in self._xy_lookup:
             return self._xy_lookup[xy_key]
-
         return _format_target_label(position)
+
+    def _current_gantry_pose(self) -> MotionPose:
+        return _coerce_motion_pose(self.gantry.get_coordinates())
+
+    def _current_tip_position(self, instrument: Any) -> MotionPose:
+        return _resolve_instrument_tip_pose(self._current_gantry_pose(), instrument)
+
+    def _record_gantry_move(
+        self,
+        *,
+        instrument_id: str,
+        instrument: Any,
+        end_pose: MotionPose,
+        target_label: str,
+    ) -> None:
+        if self._active_step is None:
+            raise RuntimeError("TracingBoard step context must be set before moves.")
+        start_pose = self._current_gantry_pose()
+        if _coord_key(start_pose) == _coord_key(end_pose):
+            return
+        segment = _motion_segment(
+            start_pose=start_pose,
+            end_pose=end_pose,
+            feed_rate=self.feed_rate,
+        )
+        self.timeline.append(
+            _motion_event_from_segment(
+                step=self._active_step,
+                instrument_id=instrument_id,
+                instrument=instrument,
+                target_label=target_label,
+                segment=segment,
+            )
+        )
+        self.gantry.move_to(end_pose.x, end_pose.y, end_pose.z)
 
     def move(
         self,
@@ -225,36 +354,48 @@ class TracingBoard(Board):
         position: Any,
     ) -> None:
         instr = self._resolve_instrument(instrument)
+        self._require_xyz_calibrated_instrument(instr)
         instrument_id = instrument if isinstance(instrument, str) else instr.name
         x, y, z = self._resolve_position(position)
-        gantry_target = resolve_gantry_target(x, y, z, instr)
-        current_pose = coerce_motion_pose(self.gantry.get_coordinates())
-        motion_segments = plan_safe_move_segments(
-            current_pose=current_pose,
-            target_pose=gantry_target,
-            safe_z_height=self.safe_z_height,
-            max_z_height=self.max_z_height,
-            feed_rate=self.feed_rate,
-        )
-        if self._active_step is None:
-            raise RuntimeError("TracingBoard step context must be set before moves.")
-
+        gantry_target = _resolve_gantry_target(x, y, z, instr)
         target_label = self._target_label_for_position(position)
-        for segment in motion_segments:
-            self.timeline.append(
-                _motion_event_from_segment(
-                    step=self._active_step,
-                    instrument_id=instrument_id,
-                    instrument=instr,
-                    target_label=target_label,
-                    segment=segment,
-                )
+        self._record_gantry_move(
+            instrument_id=instrument_id,
+            instrument=instr,
+            end_pose=gantry_target,
+            target_label=target_label,
+        )
+        self._last_target_label = target_label
+
+    def move_to_labware(
+        self,
+        instrument: str | Any,
+        labware: Any,
+    ) -> None:
+        instr = self._resolve_instrument(instrument)
+        self._require_xyz_calibrated_instrument(instr)
+        instrument_id = instrument if isinstance(instrument, str) else instr.name
+        x, y, z = self._resolve_position(labware)
+        target_label = self._target_label_for_position(labware)
+        approach_z = z + float(instr.safe_approach_height)
+        current_tip = self._current_tip_position(instr)
+
+        if current_tip.z < approach_z - _Z_TOLERANCE_MM:
+            lift_pose = _resolve_gantry_target(current_tip.x, current_tip.y, approach_z, instr)
+            self._record_gantry_move(
+                instrument_id=instrument_id,
+                instrument=instr,
+                end_pose=lift_pose,
+                target_label=target_label,
             )
-            self.gantry.move_to(
-                segment.end_pose.x,
-                segment.end_pose.y,
-                segment.end_pose.z,
-            )
+
+        approach_pose = _resolve_gantry_target(x, y, approach_z, instr)
+        self._record_gantry_move(
+            instrument_id=instrument_id,
+            instrument=instr,
+            end_pose=approach_pose,
+            target_label=target_label,
+        )
         self._last_target_label = target_label
 
 
@@ -266,8 +407,8 @@ def _motion_event_from_segment(
     target_label: str,
     segment: MotionSegmentPlan,
 ) -> dict[str, Any]:
-    start_tip = resolve_instrument_tip_pose(segment.start_pose, instrument)
-    end_tip = resolve_instrument_tip_pose(segment.end_pose, instrument)
+    start_tip = _resolve_instrument_tip_pose(segment.start_pose, instrument)
+    end_tip = _resolve_instrument_tip_pose(segment.end_pose, instrument)
     return {
         "type": "motion",
         "step_index": step.index,
@@ -328,13 +469,79 @@ def _install_action_wrappers(protocol: Protocol, board: TracingBoard) -> None:
         wrapped_methods.add(wrapped_key)
 
 
-def _resolve_asset_source(load_name: str | None) -> Path | None:
+def _expand_load_names(raw: dict[str, Any]) -> dict[str, Any]:
+    labware = raw.get("labware")
+    if not isinstance(labware, dict):
+        return raw
+
+    expanded_entries: dict[str, Any] = {}
+    for deck_key, entry in labware.items():
+        if not isinstance(entry, dict) or "load_name" not in entry:
+            expanded_entries[deck_key] = entry
+            continue
+
+        load_name = entry["load_name"]
+        base = dict(load_definition_config(load_name))
+        merged = dict(base)
+        for key, value in entry.items():
+            if key == "load_name":
+                continue
+            merged[key] = value
+        if "name" not in merged:
+            merged["name"] = deck_key
+        expanded_entries[deck_key] = merged
+
+    expanded = dict(raw)
+    expanded["labware"] = expanded_entries
+    return expanded
+
+
+@dataclass(frozen=True)
+class _PlateOrientation:
+    col_delta_x: float
+    col_delta_y: float
+    row_delta_x: float
+    row_delta_y: float
+
+
+def _resolve_plate_orientation(entry: Any) -> _PlateOrientation:
+    a1 = entry.a1_point
+    a2 = entry.calibration.a2
+    same_x = abs(a1.x - a2.x) < 1e-9
+    same_y = abs(a1.y - a2.y) < 1e-9
+
+    if same_y:
+        return _PlateOrientation(
+            col_delta_x=a2.x - a1.x,
+            col_delta_y=0.0,
+            row_delta_x=0.0,
+            row_delta_y=entry.y_offset_mm,
+        )
+
+    if same_x:
+        return _PlateOrientation(
+            col_delta_x=0.0,
+            col_delta_y=a2.y - a1.y,
+            row_delta_x=entry.x_offset_mm,
+            row_delta_y=0.0,
+        )
+
+    raise ValueError("Calibration must be axis-aligned (same x or same y).")
+
+
+def _resolve_definition_asset_path(load_name: str | None) -> Path | None:
     if not load_name:
         return None
-    try:
-        return resolve_definition_asset_path(load_name)
-    except ValueError:
+    entry = (load_registry().get("labware") or {}).get(load_name)
+    if not isinstance(entry, dict):
         return None
+    config_path = Path(definition_registry.__file__).resolve().parent / entry["config"]
+    definition_dir = config_path.parent
+    preferred = definition_dir / f"{config_path.stem}.glb"
+    if preferred.exists():
+        return preferred
+    matches = sorted(definition_dir.glob("*.glb"))
+    return matches[0] if matches else None
 
 
 def _select_render_kind(
@@ -342,9 +549,7 @@ def _select_render_kind(
     labware: Any,
     load_name: str | None,
 ) -> tuple[str, Path | None]:
-    if load_name == "ursa_tip_rack":
-        return ("tip_rack", None)
-    asset_source = _resolve_asset_source(load_name)
+    asset_source = _resolve_definition_asset_path(load_name)
     if asset_source is not None:
         return ("asset", asset_source)
     if isinstance(labware, WellPlate):
@@ -353,13 +558,15 @@ def _select_render_kind(
         return ("tip_rack", None)
     if isinstance(labware, Vial):
         return ("vial", None)
+    if isinstance(labware, Wall):
+        return ("wall", None)
     return ("bounding_box", None)
 
 
-def _points_payload(labware: Any) -> list[dict[str, Any]]:
+def _point_payloads(points: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {"id": point_id, "position": _coord_dict(coord)}
-        for point_id, coord in sorted(labware.iter_positions().items())
+        for point_id, coord in sorted(points.items())
     ]
 
 
@@ -374,11 +581,97 @@ def _dimensions_payload(labware: Any) -> dict[str, float | None]:
     }
 
 
+def _pose_center(poses: list[dict[str, float]]) -> dict[str, float]:
+    xs = [pose["x"] for pose in poses]
+    ys = [pose["y"] for pose in poses]
+    zs = [pose["z"] for pose in poses]
+    return {
+        "x": (min(xs) + max(xs)) / 2,
+        "y": (min(ys) + max(ys)) / 2,
+        "z": (min(zs) + max(zs)) / 2,
+    }
+
+
+def _placement_anchor_payload(labware: Any) -> dict[str, float] | None:
+    if isinstance(labware, (TipRack, HolderLabware)):
+        return _coord_dict(labware.location)
+    if isinstance(labware, Vial):
+        return {
+            "x": float(labware.location.x),
+            "y": float(labware.location.y),
+            "z": float(labware.location.z) - float(labware.height_mm),
+        }
+    return None
+
+
+def _named_targets_payload(labware: Any) -> list[dict[str, Any]]:
+    return _point_payloads(
+        {
+            target_id: labware.get_named_target(target_id)
+            for target_id in _iter_actionable_named_target_ids(labware)
+        }
+    )
+
+
+def _validation_points_payload(labware: Any) -> list[dict[str, Any]]:
+    return _point_payloads(labware.iter_validation_points())
+
+
+def _twin_anchor_payload(
+    *,
+    labware: Any,
+    dimensions: dict[str, float | None],
+    placement_anchor: dict[str, float] | None,
+    default_target: dict[str, float],
+    named_targets: list[dict[str, Any]],
+) -> dict[str, float]:
+    height_mm = float(dimensions["height_mm"] or 0.0)
+    if isinstance(labware, (WellPlate, TipRack)):
+        top_points = [point["position"] for point in named_targets] or [default_target]
+        center = _pose_center(top_points)
+        center["z"] = center["z"] - height_mm / 2
+        return center
+    if isinstance(labware, Vial):
+        return {
+            "x": default_target["x"],
+            "y": default_target["y"],
+            "z": default_target["z"] - height_mm / 2,
+        }
+    if isinstance(labware, TipDisposal) and placement_anchor is not None:
+        return {
+            "x": placement_anchor["x"] + float(dimensions["length_mm"] or 0.0) / 2,
+            "y": placement_anchor["y"] + float(dimensions["width_mm"] or 0.0) / 2,
+            "z": placement_anchor["z"] + height_mm / 2,
+        }
+    if isinstance(labware, (VialHolder, WellPlateHolder)):
+        child_targets = [
+            _coord_dict(child.get_default_target())
+            for child in labware.contained_labware.values()
+        ]
+        if child_targets and placement_anchor is not None:
+            center = _pose_center(child_targets)
+            center["z"] = placement_anchor["z"] + height_mm / 2
+            return center
+    if isinstance(labware, Wall):
+        return {
+            "x": (labware.corner_1.x + labware.corner_2.x) / 2,
+            "y": (labware.corner_1.y + labware.corner_2.y) / 2,
+            "z": (labware.corner_1.z + labware.corner_2.z) / 2,
+        }
+    if placement_anchor is not None and height_mm > 0:
+        return {
+            "x": placement_anchor["x"],
+            "y": placement_anchor["y"],
+            "z": placement_anchor["z"] + height_mm / 2,
+        }
+    return dict(default_target)
+
+
 def _well_plate_render_meta(
     entry: WellPlateYamlEntry | NestedWellPlateYamlEntry,
     labware: WellPlate,
 ) -> dict[str, Any]:
-    orientation: PlateOrientation = resolve_plate_orientation(entry)
+    orientation = _resolve_plate_orientation(entry)
     return {
         "rows": entry.rows,
         "columns": entry.columns,
@@ -401,7 +694,7 @@ def _tip_rack_render_meta(
     entry: TipRackYamlEntry,
     labware: TipRack,
 ) -> dict[str, Any]:
-    orientation: PlateOrientation = resolve_plate_orientation(entry)
+    orientation = _resolve_plate_orientation(entry)
     return {
         "rows": entry.rows,
         "columns": entry.columns,
@@ -431,6 +724,11 @@ def _scene_item_payload(
     parent_id: str | None = None,
 ) -> dict[str, Any]:
     render_kind, asset_source = _select_render_kind(labware=labware, load_name=load_name)
+    dimensions = _dimensions_payload(labware)
+    placement_anchor = _placement_anchor_payload(labware)
+    default_target = _coord_dict(labware.get_default_target())
+    named_targets = _named_targets_payload(labware)
+    validation_points = _validation_points_payload(labware)
     item = {
         "id": item_id,
         "parent_id": parent_id,
@@ -440,9 +738,18 @@ def _scene_item_payload(
         "render_kind": render_kind,
         "asset_path": None,
         "asset_source_path": str(asset_source) if asset_source is not None else None,
-        "primary_position": _coord_dict(labware.get_initial_position()),
-        "dimensions": _dimensions_payload(labware),
-        "points": _points_payload(labware),
+        "placement_anchor": placement_anchor,
+        "default_target": default_target,
+        "twin_anchor": _twin_anchor_payload(
+            labware=labware,
+            dimensions=dimensions,
+            placement_anchor=placement_anchor,
+            default_target=default_target,
+            named_targets=named_targets,
+        ),
+        "dimensions": dimensions,
+        "named_targets": named_targets,
+        "validation_points": validation_points,
         "render_meta": {},
     }
     if isinstance(entry, (WellPlateYamlEntry, NestedWellPlateYamlEntry)):
@@ -456,17 +763,12 @@ def _scene_item_payload(
         }
     elif isinstance(entry, (WellPlateHolderYamlEntry, VialHolderYamlEntry)):
         item["render_meta"] = {
-            "location": _coord_dict(getattr(labware, "location", labware.get_initial_position())),
             "labware_support_height_mm": getattr(labware, "labware_support_height_mm", None),
             "labware_seat_height_from_bottom_mm": getattr(
                 labware,
                 "labware_seat_height_from_bottom_mm",
                 None,
             ),
-        }
-    elif getattr(entry, "type", None) == "tip_disposal":
-        item["render_meta"] = {
-            "location": _coord_dict(getattr(labware, "location", labware.get_initial_position())),
         }
     return item
 
@@ -526,6 +828,16 @@ def _copy_scene_assets(scene_items: list[dict[str, Any]], *, output_path: Path |
         return
 
     asset_dir = output_path.parent / "assets"
+    public_prefix = Path("assets")
+    try:
+        public_root = next(parent for parent in output_path.parents if parent.name == "public")
+        relative_dir = output_path.parent.relative_to(public_root)
+        public_prefix = relative_dir / "assets"
+    except StopIteration:
+        pass
+    except ValueError:
+        pass
+
     copied: dict[Path, str] = {}
     for item in scene_items:
         source_path_value = item.pop("asset_source_path", None)
@@ -537,7 +849,7 @@ def _copy_scene_assets(scene_items: list[dict[str, Any]], *, output_path: Path |
             asset_dir.mkdir(parents=True, exist_ok=True)
             destination = asset_dir / source_path.name
             shutil.copy2(source_path, destination)
-            copied[source_path] = str(Path("assets") / destination.name)
+            copied[source_path] = "/" + str(public_prefix / destination.name)
         item["asset_path"] = copied[source_path]
 
 
@@ -557,8 +869,12 @@ def _build_scene(
         original_entries=deck_original.get("labware", {}),
     )
     _copy_scene_assets(scene_items, output_path=output_path)
+    initial_gantry_pose = MotionPose(
+        x=0.0,
+        y=0.0,
+        z=float(gantry_config.working_volume.z_max),
+    )
     instruments = []
-    initial_gantry_pose = MotionPose(x=0.0, y=0.0, z=DEFAULT_USER_MAX_Z_HEIGHT)
     for instrument_id, entry in board_schema.instruments.items():
         instrument = board.instruments[instrument_id]
         instruments.append(
@@ -570,7 +886,8 @@ def _build_scene(
                 "offset_y": instrument.offset_y,
                 "depth": instrument.depth,
                 "measurement_height": instrument.measurement_height,
-                "initial_tip_pose": resolve_instrument_tip_pose(
+                "safe_approach_height": instrument.safe_approach_height,
+                "initial_tip_pose": _resolve_instrument_tip_pose(
                     initial_gantry_pose,
                     instrument,
                 ).to_dict(),
@@ -578,6 +895,7 @@ def _build_scene(
         )
 
     return {
+        "contract_version": "cubos-deck-base-z0-v2",
         "gantry": {
             "working_volume": {
                 "x_min": gantry_config.working_volume.x_min,
@@ -590,8 +908,7 @@ def _build_scene(
             "homing_strategy": gantry_config.homing_strategy.value,
             "y_axis_motion": gantry_config.y_axis_motion.value,
             "initial_gantry_pose": initial_gantry_pose.to_dict(),
-            "safe_z_height": DEFAULT_USER_SAFE_Z_HEIGHT,
-            "max_z_height": DEFAULT_USER_MAX_Z_HEIGHT,
+            "total_z_height": gantry_config.total_z_height,
         },
         "deck": scene_items,
         "instruments": instruments,
@@ -608,7 +925,7 @@ def _ensure_supported_protocol(protocol: Protocol) -> None:
     )
     if unsupported:
         raise NotImplementedError(
-            "Phase 1 exporter currently supports only move commands. "
+            "Phase 1 exporter currently supports only move and scan commands. "
             f"Unsupported commands: {', '.join(unsupported)}"
         )
 
@@ -638,9 +955,14 @@ def export_bundle(
 
     resolved_output_path = Path(output_path) if output_path is not None else None
     gantry_config = load_gantry_from_yaml_safe(gantry_path)
-    deck = load_deck_from_yaml_safe(deck_path, total_z_height=gantry_config.total_z_height)
+    deck = load_deck_from_yaml_safe(deck_path)
 
-    tracing_gantry = _TracingGantry()
+    initial_gantry_pose = MotionPose(
+        x=0.0,
+        y=0.0,
+        z=float(gantry_config.working_volume.z_max),
+    )
+    tracing_gantry = _TracingGantry(initial_pose=initial_gantry_pose)
     loaded_board = load_board_from_yaml_safe(board_path, tracing_gantry, mock_mode=True)
     timeline: list[dict[str, Any]] = []
     tracing_board = TracingBoard(
@@ -659,7 +981,7 @@ def export_bundle(
 
     board_schema = BoardYamlSchema.model_validate(_load_yaml(board_path))
     deck_original = _load_yaml(deck_path)
-    deck_resolved_schema = load_deck_render_schema(deck_path)
+    deck_resolved_schema = DeckYamlSchema.model_validate(_expand_load_names(deck_original))
 
     context = ProtocolContext(
         board=tracing_board,

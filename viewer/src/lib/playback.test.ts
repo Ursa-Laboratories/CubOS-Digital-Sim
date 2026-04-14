@@ -4,6 +4,7 @@ import type { TwinBundle } from "../types";
 
 const bundle: TwinBundle = {
   scene: {
+    contract_version: "cubos-deck-base-z0-v2",
     gantry: {
       working_volume: {
         x_min: 0,
@@ -16,8 +17,7 @@ const bundle: TwinBundle = {
       homing_strategy: "xy_hard_limits",
       y_axis_motion: "head",
       initial_gantry_pose: { x: 0, y: 0, z: 0 },
-      safe_z_height: 10,
-      max_z_height: 0,
+      total_z_height: 90,
     },
     deck: [],
     instruments: [
@@ -29,6 +29,7 @@ const bundle: TwinBundle = {
         offset_y: -2,
         depth: 7,
         measurement_height: 3,
+        safe_approach_height: 3,
         initial_tip_pose: { x: 5, y: -2, z: 7 },
       },
     ],
@@ -102,13 +103,16 @@ describe("playback helpers", () => {
         model_name: "sbs",
         render_kind: "well_plate",
         asset_path: null,
-        primary_position: { x: 0, y: 0, z: 0 },
+        placement_anchor: null,
+        default_target: { x: 0, y: 0, z: 0 },
+        twin_anchor: { x: 0, y: 0, z: -2.5 },
         dimensions: { length_mm: 10, width_mm: 20, height_mm: 5 },
-        points: [],
+        named_targets: [],
+        validation_points: [],
         render_meta: {
           column_vector: { x: 0, y: 9 },
         },
       }),
-    ).toBeCloseTo(Math.PI / 2);
+    ).toBeCloseTo(-Math.PI / 2);
   });
 });

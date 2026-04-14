@@ -8,13 +8,15 @@ Python dependency and provides:
 
 ## Install
 
-For a normal install, the package depends on CubOS from GitHub:
+For a normal install, the package depends on CubOS from the
+`refactor-z-coordinates` branch on GitHub:
 
 ```bash
 pip install .
 ```
 
-For local development against this workspace's CubOS checkout:
+For local development against this workspace's CubOS checkout on
+`refactor-z-coordinates`:
 
 ```bash
 pip install -e /path/to/CubOS

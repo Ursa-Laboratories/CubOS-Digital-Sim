@@ -24,7 +24,7 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 export function toWorldPosition(pose: Pose): [number, number, number] {
-  return [pose.x, -pose.z, pose.y];
+  return [pose.x, pose.z, -pose.y];
 }
 
 export function getDeckYawRadians(item: SceneDeckItem): number {
@@ -35,7 +35,7 @@ export function getDeckYawRadians(item: SceneDeckItem): number {
   if (!columnVector) {
     return 0;
   }
-  return Math.atan2(columnVector.y, columnVector.x);
+  return Math.atan2(-columnVector.y, columnVector.x);
 }
 
 export function lerpPose(startPose: Pose, endPose: Pose, progress: number): Pose {

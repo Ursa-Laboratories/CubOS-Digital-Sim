@@ -4408,16 +4408,31 @@
     ],
     "instruments": [
       {
-        "id": "asmi",
-        "type": "asmi",
-        "vendor": "vernier",
-        "offset_x": 0.0,
+        "id": "liquid_handler",
+        "type": "pipette",
+        "vendor": "opentrons",
+        "offset_x": -12.5,
         "offset_y": 0.0,
         "depth": 0.0,
         "measurement_height": 0.0,
         "safe_approach_height": 0.0,
         "initial_tip_pose": {
-          "x": 0.0,
+          "x": -12.5,
+          "y": 0.0,
+          "z": 80.0
+        }
+      },
+      {
+        "id": "potentiostat",
+        "type": "uvvis_ccs",
+        "vendor": "thorlabs",
+        "offset_x": 12.5,
+        "offset_y": 0.0,
+        "depth": 0.0,
+        "measurement_height": 0.0,
+        "safe_approach_height": 0.0,
+        "initial_tip_pose": {
+          "x": 12.5,
           "y": 0.0,
           "z": 80.0
         }
@@ -4430,39 +4445,295 @@
       "step_index": 0,
       "command": "move",
       "phase": "move_xyz",
-      "instrument_id": "asmi",
-      "target_label": "well_plate_holder.plate.A1",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_1",
       "start_gantry_pose": {
         "x": 0.0,
         "y": 0.0,
         "z": 80.0
       },
       "end_gantry_pose": {
-        "x": 292.0,
-        "y": 188.0,
-        "z": 19.35
+        "x": 66.5,
+        "y": 20.0,
+        "z": 75.0
       },
       "start_tip_pose": {
-        "x": 0.0,
+        "x": -12.5,
         "y": 0.0,
         "z": 80.0
       },
       "end_tip_pose": {
-        "x": 292.0,
-        "y": 188.0,
-        "z": 19.35
+        "x": 54.0,
+        "y": 20.0,
+        "z": 75.0
       },
       "feed_rate": 2000.0,
-      "distance_mm": 352.5427952745595,
-      "real_duration_s": 10.576283858236785,
-      "display_duration_s": 10.576283858236785
+      "distance_mm": 69.62219473702334,
+      "real_duration_s": 2.0886658421107,
+      "display_duration_s": 2.0886658421107
+    },
+    {
+      "type": "motion",
+      "step_index": 1,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_2",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 20.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 53.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 20.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 53.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 2,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_3",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 53.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 86.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 53.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 86.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 3,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_4",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 86.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 119.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 86.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 119.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 4,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_5",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 119.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 152.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 119.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 152.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 5,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_6",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 152.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 185.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 152.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 185.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 6,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_7",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 185.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 218.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 185.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 218.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 7,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_8",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 218.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 251.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 218.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 251.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
+    },
+    {
+      "type": "motion",
+      "step_index": 8,
+      "command": "move",
+      "phase": "traverse_xy",
+      "instrument_id": "liquid_handler",
+      "target_label": "vial_holder.vial_9",
+      "start_gantry_pose": {
+        "x": 66.5,
+        "y": 251.0,
+        "z": 75.0
+      },
+      "end_gantry_pose": {
+        "x": 66.5,
+        "y": 284.0,
+        "z": 75.0
+      },
+      "start_tip_pose": {
+        "x": 54.0,
+        "y": 251.0,
+        "z": 75.0
+      },
+      "end_tip_pose": {
+        "x": 54.0,
+        "y": 284.0,
+        "z": 75.0
+      },
+      "feed_rate": 2000.0,
+      "distance_mm": 33.0,
+      "real_duration_s": 0.99,
+      "display_duration_s": 0.99
     }
   ],
   "summary": {
-    "step_count": 1,
-    "timeline_event_count": 1,
-    "total_display_duration_s": 10.576283858236785,
+    "step_count": 9,
+    "timeline_event_count": 9,
+    "total_display_duration_s": 10.0086658421107,
     "validation_skipped": true,
-    "validation_violation_count": 0
+    "validation_violation_count": 8
   }
 }

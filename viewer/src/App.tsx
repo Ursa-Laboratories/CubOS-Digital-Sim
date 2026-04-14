@@ -47,65 +47,14 @@ function poseSpread(points: Pose[], fallback: number): [number, number, number] 
 }
 
 function deckBoxPose(item: SceneDeckItem): { center: Pose; size: [number, number, number] } {
-  const fallbackPoint = item.primary_position;
-  const points = item.points.length > 0 ? item.points.map((point) => point.position) : [fallbackPoint];
-  const center = poseCenter(points);
-  const renderMeta = item.render_meta as {
-    location?: Pose;
-    labware_support_height_mm?: number;
-    labware_seat_height_from_bottom_mm?: number;
-  };
-  let [length, height, width] = [
+  const points = item.named_targets.length > 0 ? item.named_targets.map((point) => point.position) : [item.default_target];
+  const [length, height, width] = [
     item.dimensions.length_mm ?? poseSpread(points, 10)[0],
-    item.dimensions.height_mm ?? 6,
+    item.dimensions.height_mm ?? Math.max(poseSpread(points, 10)[1], 1),
     item.dimensions.width_mm ?? poseSpread(points, 10)[2],
   ];
-  const topAnchored = item.render_kind === "well_plate" || item.render_kind === "tip_rack";
-  const anchorLocation = renderMeta.location;
-  const childPoints = item.points
-    .filter((point) => point.id !== "location")
-    .map((point) => point.position);
-  const cornerAnchored =
-    item.type === "tip_disposal" ||
-    (item.type === "vial_holder" &&
-      anchorLocation !== undefined &&
-      points.some((point) => point.x > anchorLocation.x || point.y > anchorLocation.y));
-
-  if ((item.type === "vial_holder" || item.type === "well_plate_holder") && anchorLocation) {
-    height = Math.min(
-      height,
-      renderMeta.labware_seat_height_from_bottom_mm ?? renderMeta.labware_support_height_mm ?? 8,
-    );
-    const childCenter = childPoints.length > 0 ? poseCenter(childPoints) : center;
-    return {
-      center: {
-        x: childCenter.x,
-        y: childCenter.y,
-        z: anchorLocation.z + height / 2,
-      },
-      size: [length, height, width],
-    };
-  }
-
-  if (cornerAnchored && anchorLocation) {
-    return {
-      center: {
-        x: anchorLocation.x + length / 2,
-        y: anchorLocation.y + width / 2,
-        z: anchorLocation.z + height / 2,
-      },
-      size: [length, height, width],
-    };
-  }
-
   return {
-    center: {
-      x: center.x,
-      y: center.y,
-      // Well/tip positions are contact/working points on the top surface, so the
-      // mesh body should extend downward from them in user-space Z.
-      z: topAnchored ? center.z + height / 2 : center.z,
-    },
+    center: item.twin_anchor,
     size: [length, height, width],
   };
 }
@@ -158,26 +107,21 @@ function OriginMarker() {
 }
 
 function DeckItemMesh({ item }: { item: SceneDeckItem }) {
-  const points = item.points.map((point) => point.position);
+  const points = item.named_targets.map((point) => point.position);
   const { center, size } = deckBoxPose(item);
   const worldCenter = toWorldPosition(center);
   const yawRadians = getDeckYawRadians(item);
 
   if (item.render_kind === "vial") {
-    const diameter = Number(item.render_meta.diameter_mm ?? item.dimensions.length_mm ?? 14);
-    const height = Number(item.render_meta.height_mm ?? item.dimensions.height_mm ?? 30);
-    const baseAnchored = item.parent_id !== null;
     return (
       <group>
-        <mesh
-          position={toWorldPosition({
-            ...item.primary_position,
-            z: baseAnchored ? item.primary_position.z + height / 2 : item.primary_position.z,
-          })}
-        >
-          <cylinderGeometry args={[diameter / 2, diameter / 2, height, 20]} />
+        <mesh position={worldCenter}>
+          <cylinderGeometry args={[size[0] / 2, size[0] / 2, size[1], 20]} />
           <meshStandardMaterial color="#d4a45f" roughness={0.45} metalness={0.05} />
         </mesh>
+        <Sphere args={[1.2, 12, 12]} position={toWorldPosition(item.default_target)}>
+          <meshStandardMaterial color="#9a2b26" />
+        </Sphere>
       </group>
     );
   }
@@ -205,6 +149,11 @@ function DeckItemMesh({ item }: { item: SceneDeckItem }) {
           <meshStandardMaterial color="#9a2b26" />
         </Sphere>
       ))}
+      {points.length === 0 ? (
+        <Sphere args={[1.2, 12, 12]} position={toWorldPosition(item.default_target)}>
+          <meshStandardMaterial color="#9a2b26" />
+        </Sphere>
+      ) : null}
     </group>
   );
 }
@@ -286,7 +235,18 @@ function TwinScene({
     const points: Pose[] = [
       { x: volume.x_min, y: volume.y_min, z: volume.z_min },
       { x: volume.x_max, y: volume.y_max, z: volume.z_max },
-      ...bundle.scene.deck.flatMap((item) => item.points.map((point) => point.position)),
+      ...bundle.scene.deck.flatMap((item) => {
+        const deckPoints: Pose[] = [
+          item.default_target,
+          item.twin_anchor,
+          ...item.named_targets.map((point) => point.position),
+          ...item.validation_points.map((point) => point.position),
+        ];
+        if (item.placement_anchor) {
+          deckPoints.push(item.placement_anchor);
+        }
+        return deckPoints;
+      }),
       ...Object.values(instrumentTips),
       gantryPose,
     ];
@@ -303,7 +263,7 @@ function TwinScene({
         position={[
           sceneBounds.center.x - sceneBounds.spread[0] * 0.8,
           sceneBounds.spread[0] * 0.7 + 80,
-          sceneBounds.center.y + sceneBounds.spread[2] * 1.1,
+          -sceneBounds.center.y + sceneBounds.spread[2] * 1.1,
         ]}
         fov={38}
       />

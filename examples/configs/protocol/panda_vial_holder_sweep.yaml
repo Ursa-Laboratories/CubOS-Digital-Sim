@@ -1,0 +1,40 @@
+# Visualization protocol for the Panda deck vial holder using the two-instrument board.
+# The liquid handler visits each vial target in sequence so the bundle shows
+# the full holder traversal while preserving the second instrument offset.
+
+protocol:
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_1
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_2
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_3
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_4
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_5
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_6
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_7
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_8
+
+  - move:
+      instrument: liquid_handler
+      position: vial_holder.vial_9
