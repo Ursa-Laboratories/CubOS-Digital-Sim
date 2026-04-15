@@ -39,3 +39,9 @@ python -m digital_twin \
 ## Viewer
 
 The browser viewer lives in `viewer/`.
+
+## Contributor Workflow
+
+Repository-specific working guidance for Codex and other agents lives in
+`AGENTS.md`. Progress for each chat is recorded in dated files under
+`progress/`.
