@@ -1,107 +1,106 @@
-export type Pose = {
+export type Point3D = {
   x: number;
   y: number;
   z: number;
 };
 
-export type WorkingVolume = {
-  x_min: number;
-  x_max: number;
-  y_min: number;
-  y_max: number;
-  z_min: number;
-  z_max: number;
+export type Aabb = {
+  label: string;
+  kind: string;
+  min: Point3D;
+  max: Point3D;
+  size: Point3D;
+  center: Point3D;
 };
 
-export type SceneDeckPoint = {
-  id: string;
-  position: Pose;
-};
-
-export type SceneDeckItem = {
-  id: string;
-  parent_id: string | null;
-  type: string;
+export type LabwareItem = {
+  key: string;
+  parentKey: string | null;
   name: string;
-  model_name: string;
-  render_kind: "asset" | "well_plate" | "tip_rack" | "vial" | "bounding_box";
-  asset_path: string | null;
-  primary_position: Pose;
-  dimensions: {
-    length_mm: number | null;
-    width_mm: number | null;
-    height_mm: number | null;
-  };
-  points: SceneDeckPoint[];
-  render_meta: Record<string, unknown>;
+  kind: string;
+  modelName: string;
+  anchor: Point3D;
+  geometry: Record<string, number | null>;
+  aabb: Aabb | null;
+  positions: Record<string, Point3D>;
+  wells?: Array<{ id: string; center: Point3D }>;
+  tips?: Array<{ id: string; center: Point3D; present: boolean }>;
+  children: LabwareItem[];
 };
 
-export type SceneInstrument = {
-  id: string;
+export type Instrument = {
+  name: string;
   type: string;
-  vendor: string;
-  offset_x: number;
-  offset_y: number;
+  vendor: string | null;
+  offset: Point3D;
   depth: number;
-  measurement_height: number;
-  initial_tip_pose: Pose;
+  safeApproachHeight: number;
+  measurementHeight: number;
 };
 
-export type MotionEvent = {
-  type: "motion";
-  step_index: number;
+export type MotionPoint = {
+  index: number;
+  stepIndex: number;
   command: string;
   phase: string;
-  instrument_id: string;
-  target_label: string;
-  start_gantry_pose: Pose;
-  end_gantry_pose: Pose;
-  start_tip_pose: Pose;
-  end_tip_pose: Pose;
-  feed_rate: number;
-  distance_mm: number;
-  real_duration_s: number;
-  display_duration_s: number;
+  targetRef: string;
+  instrument: string;
+  tool: Point3D;
+  gantry: Point3D;
+  envelope: Aabb;
 };
 
-export type ActionEvent = {
-  type: "action";
-  step_index: number;
+export type TimelineStep = {
+  index: number;
   command: string;
-  kind: string;
-  instrument_id: string | null;
-  target_label: string | null;
-  duration_s: number;
-  payload: Record<string, unknown>;
+  args: Record<string, unknown>;
+  pathStart: number;
+  pathEnd: number;
 };
 
-export type DwellEvent = {
-  type: "dwell";
-  step_index: number;
-  command: string;
-  duration_s: number;
-  label: string;
+export type TwinWarning = {
+  severity: "warning" | "error";
+  type: string;
+  stepIndex: number;
+  pathIndex: number;
+  instrument: string;
+  targetRef: string;
+  object: string;
+  distanceMm: number;
+  message: string;
 };
 
-export type TimelineEvent = MotionEvent | ActionEvent | DwellEvent;
-
-export type TwinBundle = {
-  scene: {
-    gantry: {
-      working_volume: WorkingVolume;
-      homing_strategy: string;
-      y_axis_motion: string;
-      initial_gantry_pose: Pose;
-      safe_z_height: number;
-      max_z_height: number;
+export type DigitalTwin = {
+  schemaVersion: string;
+  generatedAt: string;
+  source: Record<string, string | null>;
+  coordinateSystem: {
+    frame: string;
+    origin: string;
+    axes: Record<string, string>;
+    units: string;
+  };
+  gantry: {
+    workingVolume: {
+      x_min: number;
+      x_max: number;
+      y_min: number;
+      y_max: number;
+      z_min: number;
+      z_max: number;
     };
-    deck: SceneDeckItem[];
-    instruments: SceneInstrument[];
+    homePosition: Point3D;
+    instruments: Instrument[];
   };
-  timeline: TimelineEvent[];
-  summary: {
-    step_count: number;
-    timeline_event_count: number;
-    total_display_duration_s: number;
+  deck: { labware: LabwareItem[] };
+  protocol: {
+    positions: Record<string, Point3D>;
+    timeline: TimelineStep[];
   };
+  motion: {
+    timeline: TimelineStep[];
+    segments: unknown[];
+    path: MotionPoint[];
+  };
+  warnings: TwinWarning[];
 };
