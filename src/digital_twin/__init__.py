@@ -1,5 +1,5 @@
-"""Digital twin export helpers."""
+"""CubOS digital twin exporter and first-pass simulation helpers."""
 
-from .exporter import export_bundle, export_bundle_to_path
+from .exporter import export_digital_twin, write_digital_twin
 
-__all__ = ["export_bundle", "export_bundle_to_path"]
+__all__ = ["export_digital_twin", "write_digital_twin"]

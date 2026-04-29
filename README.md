@@ -1,39 +1,45 @@
 # CubOS Digital Twin
 
-Standalone digital twin package for CubOS. This package depends on CubOS as a
-Python dependency and provides:
+Clean first-pass digital twin for CubOS. The Python exporter loads CubOS
+gantry, deck, and protocol YAML through CubOS loader APIs, then emits a
+frontend-friendly JSON bundle for a React + Three.js viewer.
 
-- `python -m digital_twin` bundle export
-- a browser viewer under `viewer/`
-
-## Install
-
-For a normal install, the package depends on CubOS from GitHub:
-
-```bash
-pip install .
-```
-
-For local development against this workspace's CubOS checkout:
-
-```bash
-pip install -e /path/to/CubOS
-pip install --no-deps -e /path/to/CubOS/digital-twin
-```
+Coordinate convention follows CubOS deck space: front-left-bottom origin,
+`+X` right, `+Y` away/back, and `+Z` up.
 
 ## Export
 
-From inside this package:
+Use a local CubOS checkout as the source of truth:
 
 ```bash
 python -m digital_twin \
-  --gantry ../configs/gantry/cubos_xl.yaml \
-  --deck ../configs/deck/two_instrument_deck.yaml \
-  --board ../configs/board/two_instrument_board.yaml \
-  --protocol ../configs/protocol/two_instrument_visualization_test.yaml \
-  --out viewer/public/examples/two-instrument-cubos-xl.json
+  --cubos-root /home/achan/.openclaw/workspace/Ursa-CubOS \
+  --gantry /home/achan/.openclaw/workspace/Ursa-CubOS/configs/gantry/cub_xl_sterling.yaml \
+  --deck /home/achan/.openclaw/workspace/Ursa-CubOS/configs/deck/sterling_deck.yaml \
+  --protocol /home/achan/.openclaw/workspace/Ursa-CubOS/configs/protocol/sterling_vial_scan.yaml \
+  --out viewer/public/examples/sterling-vial-scan.json
 ```
+
+The exported schema includes:
+
+- CubOS working volume, home pose, instruments, offsets, and approach heights.
+- Deck labware, contained labware, wells/tips/slots, and first-pass AABB geometry.
+- Protocol timeline with named positions.
+- Interpolated step-by-step TCP and gantry motion path.
+- AABB collision/proximity warnings against non-target labware.
 
 ## Viewer
 
-The browser viewer lives in `viewer/`.
+The browser viewer lives in `viewer/` and loads
+`public/examples/sterling-vial-scan.json` by default.
+
+```bash
+cd viewer
+npm install
+npm test
+npm run build
+```
+
+In this container, local server/browser verification may be blocked by missing
+browser binaries or port-listen restrictions. `progress/static-render.svg` is
+the generated static render fallback from the same JSON bundle.

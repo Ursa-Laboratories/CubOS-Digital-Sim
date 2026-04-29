@@ -1,54 +1,28 @@
 # Digital Twin Viewer
 
-Browser viewer for CubOS protocol replay bundles exported by `python -m digital_twin`.
+React + Three.js viewer for JSON bundles exported by `python -m digital_twin`.
+The first screen is the usable simulation: deck volume, axes, labware/wells,
+gantry bridge/carriage, active instrument envelope, protocol timeline, motion
+path, and first-pass AABB warnings.
 
 ## Default Example
 
-The app ships with a checked-in example bundle generated from:
+The checked-in example bundle is generated from real CubOS Sterling configs:
 
-- `configs/gantry/cubos_xl.yaml`
-- `configs/deck/panda_deck.yaml`
-- `configs/board/asmi_board.yaml`
-- `configs/protocol/asmi_panda_deck_test.yaml`
+- `configs/gantry/cub_xl_sterling.yaml`
+- `configs/deck/sterling_deck.yaml`
+- `configs/protocol/sterling_vial_scan.yaml`
 
-That bundle lives at `public/examples/asmi-panda-deck.json`.
+The bundle lives at `public/examples/sterling-vial-scan.json`.
 
 ## Development
 
-Install dependencies:
-
 ```bash
 npm install
-```
-
-Start the dev server:
-
-```bash
+npm test
+npm run build
 npm run dev
 ```
 
-Run the app tests:
-
-```bash
-npm test
-```
-
-Build the app:
-
-```bash
-npm run build
-```
-
-## Exporting A New Bundle
-
-From the `digital-twin/` package root, using a CubOS checkout one directory up:
-
-```bash
-python -m digital_twin \
-  --gantry ../configs/gantry/cubos_xl.yaml \
-  --deck ../configs/deck/panda_deck.yaml \
-  --board ../configs/board/asmi_board.yaml \
-  --protocol ../configs/protocol/asmi_panda_deck_test.yaml \
-  --skip-validation \
-  --out viewer/public/examples/asmi-panda-deck.json
-```
+The viewer maps CubOS `(x, y, z)` to Three.js `(x, z, -y)`, preserving CubOS
+deck semantics while using Three.js's Y-up world.
